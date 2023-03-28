@@ -1,8 +1,10 @@
 mod lexer;
+mod parser;
 mod file_utils;
 
 use file_utils::load_file;
 use lexer::Lexer;
+use parser::Parser;
 
 fn main() {
     let file_path = "test.vito";
@@ -12,5 +14,10 @@ fn main() {
     let mut lexer = Lexer::new(file_contents.clone());
     let tokens = lexer.run();
 
-    println!("{:?}", tokens);
+    println!("Tokens: {:?}", tokens);
+    
+    let ast = Parser::new(&tokens.clone()).parse();
+
+    println!("AST: {:?}", ast);
+
 }

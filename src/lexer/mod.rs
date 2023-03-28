@@ -1,5 +1,5 @@
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // Keywords
     Let,
@@ -21,6 +21,9 @@ pub enum Token {
     RightBrace,
 
     Terminator,
+    Colon,
+
+    Return,
     // Misc
     EOF,
 }
@@ -61,6 +64,10 @@ impl Lexer {
                 },
                 ';' => {
                     tokens.push(Token::Terminator);
+                    self.advance();
+                },
+                ':' => {
+                    tokens.push(Token::Colon);
                     self.advance();
                 },
                 '+' => {
@@ -112,6 +119,9 @@ impl Lexer {
                         "let" => {
                             tokens.push(Token::Let);
                         },
+                        "return" => {
+                            tokens.push(Token::Return);
+                        },
                         _ => {
                             tokens.push(Token::Identifier(ident));
                         },
@@ -122,6 +132,9 @@ impl Lexer {
                 },
             }
         }
+
+        // No tokens left, so we're done
+        tokens.push(Token::EOF);
 
         tokens
     }
@@ -197,6 +210,7 @@ mod tests {
             Token::Plus,
             Token::IntegerLiteral(10),
             Token::Terminator,
+            Token::EOF,
         ]);
     }
 
@@ -211,6 +225,7 @@ mod tests {
             Token::Equal,
             Token::StringLiteral(String::from("Hello World!")),
             Token::Terminator,
+            Token::EOF,
         ]);
     }
 
@@ -230,7 +245,41 @@ mod tests {
             Token::IntegerLiteral(10),
             Token::RightParen,
             Token::Terminator,
+            Token::EOF,
         ]);
     }
 
+    #[test]
+    fn test_dictionary() {
+        let input = String::from("let x = {\"key\": \"value\"};");
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.run();
+
+        assert_eq!(tokens, vec![
+            Token::Let,
+            Token::Identifier(String::from("x")),
+            Token::Equal,
+            Token::LeftBrace,
+            Token::StringLiteral(String::from("key")),
+            Token::Colon,
+            Token::StringLiteral(String::from("value")),
+            Token::RightBrace,
+            Token::Terminator,
+            Token::EOF,
+        ]);
+    }
+
+    #[test]
+    fn test_return_statement() {
+        let input = String::from("return 5;");
+let mut lexer = Lexer::new(input);
+        let tokens = lexer.run();
+
+        assert_eq!(tokens, vec![
+            Token::Return,
+            Token::IntegerLiteral(5),
+            Token::Terminator,
+            Token::EOF,
+        ]);
+    }
 }
