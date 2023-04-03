@@ -1,6 +1,7 @@
 mod lexer;
 mod parser;
 mod file_utils;
+mod compiler;
 
 use file_utils::load_file;
 use lexer::Lexer;
@@ -16,8 +17,12 @@ fn main() {
 
     println!("Tokens: {:?}", tokens);
     
-    let ast = Parser::new(&tokens.clone()).parse();
+    let mut parser = Parser::new(&tokens);
+    let ast = parser.parse();
 
-    println!("AST: {:?}", ast);
+    match ast {
+        Ok(ast) => println!("AST: {:?}", ast),
+        Err(e) => eprintln!("Error: {:?}", e.to_string())
+    }
 
 }

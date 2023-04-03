@@ -2,7 +2,7 @@ use crate::lexer::Token;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identifier {
-    name: String
+    pub name: String
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +31,6 @@ impl From<&Token> for Identifier {
 
 }
 
-
 /// Interface that should be implemented for most statements, to be instantiated from tokens
 trait FromToken {
     fn from_token(token: Token) -> Self;
@@ -42,6 +41,44 @@ trait FromToken {
 pub enum Expression {
     Literal(Literal),
     Identifier(Identifier),
+    UnaryOp(Box<Expression>, UnaryOperator),
+    BinaryOp(Box<Expression>, Box<Expression>, BinaryOperator),
+}
+
+impl FromToken for Expression {
+    fn from_token(token: Token) -> Self {
+        match token {
+            Token::IntegerLiteral(value) => Expression::Literal(Literal::Integer(value)),
+            Token::StringLiteral(value) => Expression::Literal(Literal::String(value)),
+            Token::Identifier(name) => Expression::Identifier(Identifier::from(name)),
+            _ => panic!("Cannot convert token to expression")
+        }
+    }
+}
+
+/// Unary Operators
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UnaryOperator {
+    Negate,
+    Not,
+}
+
+/// Binary Operators
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    And,
+    Or,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

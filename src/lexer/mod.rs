@@ -1,4 +1,5 @@
 
+// TODO: We probably want to include token spans in the tokens themselves
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // Keywords
@@ -6,6 +7,8 @@ pub enum Token {
     // Operators
     Plus,
     Minus,
+    Asterisk,
+    Slash,
     Equal,
     Comma,
     // Identifiers
@@ -25,6 +28,7 @@ pub enum Token {
 
     Return,
     // Misc
+    Comment,
     EOF,
 }
 
@@ -41,13 +45,12 @@ pub struct Lexer {
 impl Lexer {
 
     pub fn new(input: String) -> Lexer {
-        let mut l = Lexer {
+        Lexer {
             input: input,
             read_position: 0,
             current_line: 0,
             current_column: 0,
-        };
-        l
+        }
     }
 
     fn current_char(&self) -> Option<char> {
@@ -111,6 +114,15 @@ impl Lexer {
                 '"' => {
                     let string = self.read_string();
                     tokens.push(Token::StringLiteral(string));
+                },
+                // Match a comment
+                '&' => {
+                    // Skip the ampersand
+                    self.advance();
+                    // Skip the rest of the line
+                    while self.current_char().is_some() && self.current_char().unwrap() != '\n' {
+                        self.advance();
+                    }
                 },
                 // Match a keyword
                 _ if c.is_alphabetic() => {
