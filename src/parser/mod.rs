@@ -1,11 +1,12 @@
 mod statements;
 
+use std::cell::RefCell;
 use crate::lexer::Token;
 use crate::parser::statements::{Expression, Identifier, LHAssignment, Literal, UnaryOperator, BinaryOperator};
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntaxError<'a> {
     #[error("Syntax error in assignment: {0}")]
     Assignment(&'a str),
@@ -17,6 +18,8 @@ pub enum SyntaxError<'a> {
     IfBlock(&'a str),
     #[error("Syntax error in for block: {0}")]
     ForBlock(&'a str),
+    #[error("Syntax error in expression: {0}")]
+    Expression(&'a str)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,11 +53,13 @@ type TokenIterator<'a> = std::iter::Peekable<std::slice::Iter<'a, Token>>;
 ///
 /// In `Vito` everything can be parsed into
 /// a list of statements
-pub struct Parser{
+pub struct Parser <'a>{
     tokens: Vec<Token>,
 
     // Use a consumable iterator
-    // token_iter: TokenIterator<'a>,
+    // We having major problems using the token iter as a mutuable reference during parsing
+    // With RefCell we can get around this, because we dont have to get a mutuable ref of self
+    token_iter: RefCell<TokenIterator<'a>>,
 }
 
 macro_rules! expect_token_with_value {
@@ -75,35 +80,45 @@ macro_rules! expect_token {
     };
 }
 
-impl Parser {
+impl <'a>Parser<'a> {
     pub fn new(tokens: &Vec<Token>) -> Parser {
         Parser {
             tokens: tokens.clone(),
+            token_iter: RefCell::new(tokens.iter().peekable()),
         }
     }
 
     pub fn parse(&mut self) -> Result<Block, SyntaxError> {
-        let mut token_iter = self.tokens.iter().peekable();
-        self.parse_block(&mut token_iter)
+        // let mut token_iter = self.tokens.iter().peekable();
+        self.parse_block()
     }
 
-    fn parse_block(&self, token_iter: &mut TokenIterator) -> Result<Block, SyntaxError> {
+    fn peek(&self) -> Option<&Token> {
+        self.token_iter.borrow_mut().peek().map(|t| *t)
+    }
+
+    fn next(&self) -> Option<&Token> {
+        self.token_iter.borrow_mut().next()
+    }
+
+
+    fn parse_block(&mut self) -> Result<Block, SyntaxError> {
         let mut block = Block::new();
 
-        match self.parse_statements(token_iter) {
+        match self.parse_statements() {
             Ok(statements) => block.statements = statements,
-            _ => {}
-            // Err(err) => return Err(err),
+            Err(err) => return Err(err),
         }
-
-        if let Some(token) = token_iter.peek() {
+        
+        println!("Statements: {:?}", block.statements);
+        if let Some(token) = self.peek() {
+            println!("Token: {:?}", token);
             match token {
                 Token::Return => {
-                    token_iter.next();
-                    match self.parse_expression(token_iter) {
+                    self.next();
+                    match self.parse_expression() {
                         Ok(expr) => block.return_value = Some(expr),
-                        _ => {}
-                        // Err(err) => return Err(err),
+                        Err(err) => return Err(err),
                     }
                 }
                 Token::EOF => {}
@@ -116,65 +131,64 @@ impl Parser {
         Ok(block)
     }
 
-    fn parse_statements<'a>(self, token_iter: &'a mut TokenIterator) -> Result<Vec<Statement>, SyntaxError<'a>> {
+    fn parse_statements(&self) -> Result<Vec<Statement>, SyntaxError> {
         let mut statements = Vec::new();
-        while let Some(token) = token_iter.peek() {
-            if !self.is_statement(token_iter) {
-                println!("Not a statement: {:?}", token_iter.peek());
+        while let Some(token) = self.peek() {
+            if !self.is_statement() {
+                println!("Not a statement: {:?}", self.peek());
                 break;
             }
 
-            match self.parse_statement(token_iter) {
+            match self.parse_statement() {
                 Ok(statement) => statements.push(statement),
-                _ => {}
-                // Err(err) => return Err(err),
+                Err(err) => return Err(err),
             }
         }
 
         Ok(statements)
     }
 
-    fn is_statement(self, token_iter: &mut TokenIterator) -> bool {
-        match token_iter.peek() {
+    fn is_statement(&self) -> bool {
+        match self.peek() {
             Some(Token::Let) => true,
             Some(Token::Identifier(_)) => true,
             _ => false,
         }
     }
 
-    fn parse_statement<'a>(self, token_iter: &mut TokenIterator) -> Result<Statement, SyntaxError<'a>> {
+    fn parse_statement(&self) -> Result<Statement, SyntaxError> {
         // The first token should be a keyword, except for reassignment and function calls
-        let token = token_iter.peek().unwrap();
+        let token = self.peek().unwrap();
 
         match token {
-            Token::Let => self.parse_assignment(token_iter),
+            Token::Let => self.parse_assignment(),
 
             // TODO: For now, we only support function calls
-            Token::Identifier(ident) => self.parse_func_call(token_iter),
+            Token::Identifier(ident) => self.parse_func_call(),
             _ => todo!(),
         }
     }
 
-    fn parse_assignment<'a>(self, token_iter: &mut TokenIterator) -> Result<Statement, SyntaxError<'a>> {
+    fn parse_assignment(&self) -> Result<Statement, SyntaxError> {
         // Let keyword
-        expect_token!(token_iter.next().unwrap(), Token::Let, SyntaxError::Assignment, "Expected 'let' keyword");
+        expect_token!(self.next().unwrap(), Token::Let, SyntaxError::Assignment, "Expected 'let' keyword");
 
         // Identifier
-        let identifier = token_iter.next().unwrap().clone();
+        let identifier = self.next().unwrap().clone();
         expect_token_with_value!(identifier, Token::Identifier, SyntaxError::Assignment, "Expected identifier");
 
         // Equal sign
-        expect_token!(token_iter.next().unwrap(), Token::Equal, SyntaxError::Assignment, "Expected '='");
+        expect_token!(self.next().unwrap(), Token::Equal, SyntaxError::Assignment, "Expected '='");
 
         // Right hand expression
-        let expression = match self.parse_expression(token_iter) {
+        let expression = match self.parse_expression() {
             Ok(expr) => expr,
             Err(err) => return Err(err),
         };
 
         // Terminator
         expect_token!(
-            token_iter.next().unwrap(),
+            self.next().unwrap(),
             Token::Terminator,
             SyntaxError::Assignment,
             "Expected ';'"
@@ -192,20 +206,23 @@ impl Parser {
     /// `1 + 2 * 3` is also an expression that evaluates to `7`
     /// 
     /// We are using recursive descent parsing to parse expressions
-    fn parse_expression(&self, token_iter: &mut TokenIterator) -> Result<Expression, SyntaxError>{
+    fn parse_expression(&self) -> Result<Expression, SyntaxError>{
 
         // Parse the first term
-        let mut expr = self.parse_term(token_iter)?;
+        let mut expr = self.parse_term()?;
+        println!("Term: {:?}", expr);
 
         // Parse the rest of the expression
-        while let Some(token) = token_iter.peek() {
+        while let Some(token) = self.peek() {
             match token {
                 Token::Plus => {
-                    let rhs = self.parse_term(token_iter)?;
+                    self.next();
+                    let rhs = self.parse_term()?;
                     expr = Expression::BinaryOp(Box::new(expr), Box::new(rhs), BinaryOperator::Add);
                 }
                 Token::Minus => {
-                    let rhs = self.parse_term(token_iter)?;
+                    self.next();
+                    let rhs = self.parse_term()?;
                     expr = Expression::BinaryOp(Box::new(expr), Box::new(rhs), BinaryOperator::Subtract);
                 }
                 _ => break,
@@ -218,23 +235,22 @@ impl Parser {
 
     /// Parses a term
     /// A term is a list of tokens that can be evaluated to a value
-    fn parse_term(&self, token_iter: &mut TokenIterator) -> Result<Expression, SyntaxError>{
-
-        token_iter.next();
+    fn parse_term(&self) -> Result<Expression, SyntaxError>{
 
         // Parse the first factor
-        // let mut expr = self.parse_factor()?;
-        let mut expr = Expression::Literal(Literal::Integer(3));
+        let mut expr = self.parse_factor()?;
 
-        // Parse the rest of the expression
-        while let Some(token) = token_iter.next() {
+        // // Parse the rest of the expression
+        while let Some(token) = self.peek() {
             match token {
                 Token::Asterisk => {
-                    let rhs = self.parse_factor(token_iter)?;
+                    self.next();
+                    let rhs = self.parse_factor()?;
                     expr = Expression::BinaryOp(Box::new(expr), Box::new(rhs), BinaryOperator::Multiply);
                 }
                 Token::Slash => {
-                    let rhs = self.parse_factor(token_iter)?;
+                    self.next();
+                    let rhs = self.parse_factor()?;
                     expr = Expression::BinaryOp(Box::new(expr), Box::new(rhs), BinaryOperator::Divide);
                 }
                 _ => break,
@@ -246,62 +262,39 @@ impl Parser {
     }
 
     /// Parses a factor
-    fn parse_factor(&self, token_iter: &mut TokenIterator) -> Result<Expression, SyntaxError>{
+    fn parse_factor(&self) -> Result<Expression, SyntaxError>{
 
-        token_iter.next();
-
-        let token = token_iter.peek().unwrap();
-
-        match token {
-            Token::IntegerLiteral(literal_value) => {
-                token_iter.next();
-                Ok(Expression::Literal(Literal::Integer(*literal_value)))
-            }
-            Token::StringLiteral(literal_value) => {
-                token_iter.next();
-                Ok(Expression::Literal(Literal::String(literal_value.clone())))
-            }
-            Token::Identifier(ident) => {
-                token_iter.next();
-                Ok(Expression::Identifier(Identifier::from(&Token::Identifier(ident.clone()))))
-            }
-            Token::Minus => {
-                token_iter.next();
-                let rhs = self.parse_factor(token_iter)?;
-                Ok(Expression::UnaryOp(Box::new(rhs), UnaryOperator::Negate))
-            }
-            _ => todo!(),
+        if let Some(token) = self.next() {
+            println!("Token(factor): {:?}", token);
+            match token {
+                Token::IntegerLiteral(literal_value) => {
+                    return Ok(Expression::Literal(Literal::Integer(*literal_value)))
+                }
+                Token::StringLiteral(literal_value) => {
+                    return Ok(Expression::Literal(Literal::String(literal_value.clone())))
+                }
+                Token::Identifier(ident) => {
+                    return Ok(Expression::Identifier(Identifier::from(&Token::Identifier(ident.clone()))))
+                }
+                Token::Minus => {
+                    let rhs = self.parse_factor()?;
+                    return Ok(Expression::UnaryOp(Box::new(rhs), UnaryOperator::Negate))
+                }
+                _ => return Err(SyntaxError::Expression("Unexpected token")),
+            };
         }
 
+        Err(SyntaxError::Expression("Unexpected end of expression"))
     }
 
-    // fn parse_expression(&mut self) -> Result<Expression, SyntaxError> {
-    //     let literal = self.next().unwrap();
-    //     let lit = match literal {
-    //         Token::IntegerLiteral(literal_value) => {
-    //             Expression::Literal(Literal::Integer(*literal_value))
-    //         }
-    //         Token::StringLiteral(literal_value) => {
-    //             Expression::Literal(Literal::String(literal_value.clone()))
-    //         }
-    //         Token::Identifier(ident) => {
-    //             Expression::Identifier(Identifier::from(&Token::Identifier(ident.clone())))
-    //         }
-    //         _ => todo!(),
-    //     };
+    fn parse_func_call(&self) -> Result<Statement, SyntaxError> {
 
-    //     Ok(lit)
-    // }
-
-    fn parse_func_call(&self, token_iter: &mut TokenIterator) -> Result<Statement, SyntaxError> {
-
-        println!("Parsing function call");
         // Identifier
-        let identifier = token_iter.next().unwrap().clone();
+        let identifier = self.next().unwrap().clone();
         expect_token_with_value!(identifier, Token::Identifier, SyntaxError::FunctionCall, "Expected identifier");
 
         expect_token!(
-            token_iter.next().unwrap(),
+            self.next().unwrap(),
             Token::LeftParen,
             SyntaxError::FunctionCall,
             "Expected '('"
@@ -310,16 +303,16 @@ impl Parser {
         let mut arguments = Vec::new();
 
         // TODO: Check for orderin 1. expression, 2. comma 3. expression etc
-        while let Some(token) = token_iter.peek() {
+        while let Some(token) = self.peek() {
             match token {
                 Token::RightParen => {
-                    token_iter.next();
+                    self.next();
                     break;
                 }
                 Token::Comma => {
-                    token_iter.next();
+                    self.next();
                 }
-                _ => match self.parse_expression(token_iter) {
+                _ => match self.parse_expression() {
                     Ok(expr) => arguments.push(expr),
                     _ => todo!(),
                     // Err(err) => return Err(err),
@@ -328,7 +321,7 @@ impl Parser {
         }
 
         expect_token!(
-            token_iter.next().unwrap(),
+            self.next().unwrap(),
             Token::Terminator,
             SyntaxError::FunctionCall,
             "Expected ';'"
@@ -481,6 +474,68 @@ mod tests {
         let ast = parser.parse();
 
         assert!(ast.is_err());
+    }
+}
+
+mod tests_expression {
+
+    use super::*;
+
+    
+    #[test]
+    fn test_binary_expression_add() {
+        let tokens = vec![
+            Token::Return,
+            Token::IntegerLiteral(1),
+            Token::Plus,
+            Token::IntegerLiteral(2),
+            Token::Terminator,
+        ];
+
+        let mut parser = Parser::new(&tokens);
+
+        let ast = parser.parse();
+        
+        assert_eq!(
+            ast,
+            Ok(Block {
+                statements: vec![],
+                return_value: Some(Expression::BinaryOp(
+                    Box::new(Expression::Literal(Literal::Integer(1))),
+                    Box::new(Expression::Literal(Literal::Integer(2))),
+                    BinaryOperator::Add,
+                )),
+            })
+        );
+    }
+
+    #[test]
+    fn test_binary_expression_multiply() {
+
+        let tokens = vec![
+            Token::Return,
+            Token::IntegerLiteral(1),
+            Token::Asterisk,
+            Token::IntegerLiteral(2),
+            Token::Terminator,
+        ];
+
+        let mut parser = Parser::new(&tokens);
+
+        let ast = parser.parse();
+
+        assert_eq!(
+            ast,
+            Ok(Block {
+                statements: vec![],
+                return_value: Some(Expression::BinaryOp(
+                    Box::new(Expression::Literal(Literal::Integer(1))),
+                    Box::new(Expression::Literal(Literal::Integer(2))),
+                    BinaryOperator::Multiply,
+                )),
+            })
+        );
+
     }
 
 }
